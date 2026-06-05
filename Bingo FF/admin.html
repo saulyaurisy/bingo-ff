@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Bingo FF Live</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔐</text></svg>">
+    <style>
+        /* Estilos críticos para el login */
+        #loginScreen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            position: relative;
+            z-index: 1;
+        }
+        #loginScreen .login-box {
+            background: #1a1a2e;
+            border-radius: 16px;
+            padding: 30px;
+            width: 90%;
+            max-width: 400px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            position: relative;
+            z-index: 10;
+        }
+        #loginScreen input {
+            background: #12121a;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #ffffff;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 1rem;
+            width: 100%;
+            margin-bottom: 12px;
+            outline: none;
+            position: relative;
+            z-index: 11;
+        }
+        #loginScreen input:focus {
+            border-color: #00ff88;
+            box-shadow: 0 0 0 3px rgba(0, 255, 136, 0.1);
+        }
+        #loginScreen label {
+            color: #a0a0b0;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+            display: block;
+            margin-bottom: 6px;
+        }
+        #loginScreen button {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            border: none;
+            margin-top: 8px;
+            font-size: 1rem;
+            background: linear-gradient(135deg, #ff6b35, #ff4444);
+            color: white;
+        }
+        #loginScreen h3 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            text-align: center;
+            color: #ffffff;
+        }
+        #loginScreen p {
+            text-align: center;
+            color: #a0a0b0;
+            margin-bottom: 20px;
+        }
+        #loginError {
+            color: #ff4444;
+            text-align: center;
+            margin-top: 10px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Screen - CORREGIDO -->
+    <div id="loginScreen">
+        <div class="login-box">
+            <h3>🔐 Admin Login</h3>
+            <p>Acceso restringido a administradores</p>
+            <label>Email</label>
+            <input type="email" id="adminEmail" placeholder="admin@bingo.com" autocomplete="off">
+            <label>Contraseña</label>
+            <input type="password" id="adminPassword" placeholder="••••••••" autocomplete="off">
+            <button onclick="loginAdmin()">Iniciar Sesión</button>
+            <p id="loginError"></p>
+            <hr style="border-color: rgba(255,255,255,0.1); margin: 15px 0;">
+            <a href="index.html" style="display:block;text-align:center;color:#a0a0b0;text-decoration:none;">← Volver al inicio</a>
+        </div>
+    </div>
+
+    <!-- Dashboard (oculto hasta login exitoso) -->
+    <div id="dashboardScreen" class="admin-container" style="display:none;">
+        <div class="admin-header">
+            <h2>🔐 Dashboard Administrador</h2>
+            <div>
+                <span id="adminUserEmail" style="color:var(--text-secondary);margin-right:15px;"></span>
+                <button class="btn-gamer btn-end" onclick="logoutAdmin()">Cerrar Sesión</button>
+            </div>
+        </div>
+
+        <div class="row g-3">
+            <div class="col-lg-8">
+                <div class="admin-card">
+                    <h5>⏱ Control del Tiempo</h5>
+                    <div style="text-align:center;margin-bottom:15px;">
+                        <span style="font-size:2.5rem;font-weight:900;font-family:'Courier New',monospace;" id="adminTimerDisplay">--:--</span>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;">
+                        <button class="btn-gamer btn-start" onclick="controlPartida('iniciar')">▶ Iniciar Bingo</button>
+                        <button class="btn-gamer btn-pause" onclick="controlPartida('pausar')">⏸ Pausar</button>
+                        <button class="btn-gamer btn-start" onclick="controlPartida('reanudar')">▶ Reanudar</button>
+                        <button class="btn-gamer btn-end" onclick="controlPartida('finalizar')">⏹ Finalizar</button>
+                        <button class="btn-gamer btn-reset" onclick="controlPartida('reiniciar')">🔄 Reiniciar</button>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px;">
+                        <button class="btn-gamer" onclick="addTime(300)">+5 min</button>
+                        <button class="btn-gamer" onclick="addTime(600)">+10 min</button>
+                        <input type="number" id="manualTimeInput" placeholder="Segundos" 
+                               style="background:#12121a;border:1px solid rgba(255,255,255,0.2);color:#fff;padding:8px;border-radius:8px;width:100px;text-align:center;">
+                        <button class="btn-gamer" onclick="setManualTime()">⏱ Establecer</button>
+                    </div>
+                </div>
+
+                <div class="admin-card">
+                    <h5>✅ Validación de Objetivos</h5>
+                    <div class="mb-3">
+                        <label class="form-label">Seleccionar Equipo</label>
+                        <select class="form-control" id="validationTeamSelect" onchange="loadTeamObjectives()" 
+                                style="background:#12121a;border:1px solid rgba(255,255,255,0.2);color:#fff;">
+                            <option value="">-- Seleccionar equipo --</option>
+                        </select>
+                    </div>
+                    <div id="validationObjectivesList">
+                        <p style="color:#a0a0b0;">Selecciona un equipo para ver sus objetivos.</p>
+                    </div>
+                </div>
+
+                <div class="admin-card">
+                    <h5>📢 Notificaciones Globales</h5>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <input type="text" class="form-control" id="notificationInput" placeholder="Escribe un mensaje..." 
+                               style="background:#12121a;border:1px solid rgba(255,255,255,0.2);color:#fff;flex:1;min-width:200px;">
+                        <button class="btn-gamer btn-start" onclick="sendNotification()">📤 Enviar</button>
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">
+                        <button class="btn-gamer" onclick="quickNotification('Quedan 10 minutos ⏰')">⏰ Quedan 10 min</button>
+                        <button class="btn-gamer" onclick="quickNotification('Últimos 5 minutos 🔥')">🔥 Últimos 5 min</button>
+                        <button class="btn-gamer" onclick="quickNotification('¡Tiempo extra! ⚡')">⚡ Tiempo extra</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4">
+                <div class="admin-card">
+                    <h5>⚡ Eventos Especiales</h5>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        <button class="btn-gamer" onclick="triggerEvent('duplicar')" style="border-color:#ffd700;color:#ffd700;">🔥 Duplicar Puntos (5 min)</button>
+                        <button class="btn-gamer" onclick="triggerEvent('muerte_subita')" style="border-color:#ff4444;color:#ff4444;">💀 Muerte Súbita</button>
+                        <button class="btn-gamer" onclick="triggerEvent('tiempo_extra')" style="border-color:#44ff44;color:#44ff44;">⚡ Tiempo Extra</button>
+                        <button class="btn-gamer" onclick="triggerCustomEvent()" style="border-color:#4488ff;color:#4488ff;">🎯 Evento Personalizado</button>
+                    </div>
+                </div>
+
+                <div class="admin-card">
+                    <h5>👥 Gestión de Equipos</h5>
+                    <div id="teamsListAdmin"></div>
+                    <button class="btn-gamer btn-start w-100 mt-2" onclick="showCreateTeamForm()">+ Crear Equipo</button>
+                </div>
+
+                <div class="admin-card">
+                    <h5>🎯 Gestión de Objetivos</h5>
+                    <div id="objectivesListAdmin"></div>
+                    <button class="btn-gamer btn-start w-100 mt-2" onclick="showCreateObjectiveForm()">+ Crear Objetivo</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="adminToastContainer"></div>
+
+    <script src="js/firebase.js"></script>
+    <script src="js/admin.js"></script>
+</body>
+</html>
