@@ -78,7 +78,7 @@ function closeModal() { document.getElementById('nameModal').classList.remove('s
 function joinTeam() {
     const name = document.getElementById('playerName').value.trim();
     const uid = document.getElementById('playerUID').value.trim();
-    if (!name) { alert('Por favor ingresa tu nombre'); return; }
+    if (!name) { alert('Por favor ingresa tu nombre'); document.getElementById('playerName').focus(); return; }
     
     localStorage.setItem(`bingo_playerName_${currentTeam}`, name);
     localStorage.setItem(`bingo_playerUID_${currentTeam}`, uid);
@@ -127,7 +127,9 @@ function setupTeamListeners() {
         allTeams = []; snapshot.forEach(doc => allTeams.push({ id: doc.id, ...doc.data() }));
         updateTeamInfo(); renderRanking(); checkForCompletion(); renderBingoGrid();
     }));
-    unsubscribes.push(db.collection('partida').doc('actual').onSnapshot(doc => { if (doc.exists) updateTimer(doc.data()); }));
+    unsubscribes.push(db.collection('partida').doc('actual').onSnapshot(doc => {
+        if (doc.exists) updateTimer(doc.data());
+    }));
     unsubscribes.push(db.collection('notificaciones').orderBy('timestamp', 'desc').limit(5).onSnapshot(snapshot => {
         snapshot.docChanges().forEach(change => {
             if (change.type === 'added') {
@@ -150,75 +152,121 @@ async function playerToggleObjective(objectiveId) {
     let bingosGanados = [...(teamData.bingos_ganados || [])];
     
     if (completedIds.includes(objectiveId)) {
-        if (!confirm(`¿Desmarcar "${objective.nombre}"? -${objective.puntos} pts`)) return;
+        if (!confirm(`¿Quieres DESMARCAR "${objective.nombre}"?\n\nSe restarán ${objective.puntos} puntos.`)) return;
         completedIds = completedIds.filter(id => id !== objectiveId);
         const basePoints = completedIds.reduce((sum, id) => sum + (allObjectives.find(o => o.id === id)?.puntos || 0), 0);
-        const lines = calcularLineasCompletadas(completedIds);
-        puntos = basePoints + lines.reduce((sum, l) => sum + l.puntos, 0);
+        const remainingLines = calcularLineasCompletadas(completedIds);
+        puntos = basePoints + remainingLines.reduce((sum, l) => sum + l.puntos, 0);
         bingosGanados = [];
-    } else {
-        if (!confirm(`¿Encontraste "${objective.nombre}"? +${objective.puntos} pts`)) return;
-        completedIds.push(objectiveId);
-        puntos += (objective.puntos || 0);
-        const prevLines = calcularLineasCompletadas(teamData.objetivos_completados || []);
-        const newLines = calcularLineasCompletadas(completedIds);
-        newLines.filter(nl => !prevLines.some(pl => pl.tipo === nl.tipo && pl.indice === nl.indice)).forEach(b => {
-            puntos += b.puntos; bingosGanados.push(`${b.tipo}_${b.indice}_${Date.now()}`);
-        });
+        
+        try {
+            await db.collection('equipos').doc(currentTeam).update({ objetivos_completados: completedIds, puntos, bingos_ganados: bingosGanados });
+            await db.collection('notificaciones').add({ mensaje: `❌ ${teamData.nombre || currentTeam} DESMARCÓ: ${objective.nombre}`, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
+            showToast(`❌ "${objective.nombre}" desmarcado`);
+        } catch (error) { console.error('Error:', error); showToast('❌ Error al desmarcar'); }
+        return;
     }
+    
+    if (!confirm(`¿Confirmas que encontraste "${objective.nombre}"?\n\n+${objective.puntos} pts`)) return;
+    
+    completedIds.push(objectiveId);
+    puntos += (objective.puntos || 0);
+    
+    const previousLines = calcularLineasCompletadas(teamData.objetivos_completados || []);
+    const newLines = calcularLineasCompletadas(completedIds);
+    const newBingos = newLines.filter(nl => !previousLines.some(pl => pl.tipo === nl.tipo && pl.indice === nl.indice));
+    newBingos.forEach(b => { puntos += b.puntos; bingosGanados.push(`${b.tipo}_${b.indice}_${Date.now()}`); });
     
     try {
         await db.collection('equipos').doc(currentTeam).update({ objetivos_completados: completedIds, puntos, bingos_ganados: bingosGanados });
-        await db.collection('notificaciones').add({ mensaje: `${completedIds.includes(objectiveId) ? '✅' : '❌'} ${teamData.nombre || currentTeam}: ${objective.nombre}`, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
-        showToast(`${completedIds.includes(objectiveId) ? '✅' : '❌'} "${objective.nombre}"`);
-    } catch (error) { console.error('Error:', error); }
+        await db.collection('notificaciones').add({ mensaje: `✅ ${teamData.nombre || currentTeam} completó: ${objective.nombre} (+${objective.puntos} pts)`, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
+        newBingos.forEach(bingo => {
+            db.collection('notificaciones').add({ mensaje: `🎯 ¡${teamData.nombre || currentTeam} completó ${bingo.nombre}! (+${bingo.puntos} pts)`, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
+        });
+        showToast(`✅ "${objective.nombre}" +${objective.puntos} pts`);
+    } catch (error) { console.error('Error:', error); showToast('❌ Error al marcar objeto'); }
 }
 
 function renderBingoGrid() {
     const grid = document.getElementById('bingoGrid');
     if (!grid) return;
     grid.className = 'bingo-grid-3x6';
-    if (allObjectives.length === 0) { grid.innerHTML = '<p style="color:#a0a0b0;text-align:center;padding:20px;">Cargando...</p>'; return; }
+    if (allObjectives.length === 0) { grid.innerHTML = '<p style="color:#a0a0b0;text-align:center;grid-column:1/-1;padding:20px;">Cargando objetivos...</p>'; return; }
     
-    const completedIds = (allTeams.find(t => t.id === currentTeam)?.objetivos_completados || []);
+    const currentTeamData = allTeams.find(t => t.id === currentTeam);
+    const completedIds = currentTeamData?.objetivos_completados || [];
     const linesCompleted = calcularLineasCompletadas(completedIds);
     
     grid.innerHTML = allObjectives.map((obj, index) => {
         const isCompleted = completedIds.includes(obj.id);
-        const fila = Math.floor(index / COLUMNAS), columna = index % COLUMNAS;
-        return `<div class="bingo-item ${isCompleted ? 'completed' : ''} ${isCompleted && verificarObjetoEnLinea(fila, columna, linesCompleted) ? 'bingo-line' : ''}" onclick="playerToggleObjective('${obj.id}')" style="cursor:pointer;">
+        const fila = Math.floor(index / COLUMNAS);
+        const columna = index % COLUMNAS;
+        const enLinea = verificarObjetoEnLinea(fila, columna, linesCompleted);
+        
+        return `<div class="bingo-item ${isCompleted ? 'completed' : ''} ${enLinea && isCompleted ? 'bingo-line' : ''}" onclick="playerToggleObjective('${obj.id}')" style="cursor:pointer;">
             <div class="item-position">${fila + 1},${columna + 1}</div>
             <img src="${obj.imagen}" alt="${obj.nombre}" class="item-img" onerror="this.src='https://via.placeholder.com/56/2a2a3a/ffffff?text=${encodeURIComponent(obj.nombre.charAt(0))}'">
-            <div class="item-name">${obj.nombre}</div><div class="item-points">+${obj.puntos || 0} pts</div>
-            <div class="item-status ${isCompleted ? 'done' : 'pending'}">${isCompleted ? '✓ Completado' : '□ Marcar'}</div></div>`;
+            <div class="item-name">${obj.nombre}</div>
+            <div class="item-points">+${obj.puntos || 0} pts</div>
+            <div class="item-status ${isCompleted ? 'done' : 'pending'}">${isCompleted ? '✓ Completado' : '□ Click para marcar'}</div>
+        </div>`;
     }).join('');
     
-    const info = document.getElementById('bingoLinesInfo'); if (info) info.remove();
+    const existingInfo = document.getElementById('bingoLinesInfo');
+    if (existingInfo) existingInfo.remove();
+    
     if (linesCompleted.length > 0) {
-        const div = document.createElement('div'); div.id = 'bingoLinesInfo';
-        div.style.cssText = 'text-align:center;margin-top:10px;color:#ffd700;font-weight:700;padding:8px;';
-        div.textContent = `🏆 Líneas: ${linesCompleted.map(l => l.nombre).join(', ')} (+${linesCompleted.reduce((s, l) => s + l.puntos, 0)} pts)`;
-        grid.parentNode.appendChild(div);
+        const gridParent = grid.parentNode;
+        const infoDiv = document.createElement('div');
+        infoDiv.id = 'bingoLinesInfo';
+        infoDiv.style.cssText = 'text-align:center;margin-top:10px;color:#ffd700;font-weight:700;font-size:0.9rem;padding:8px;';
+        infoDiv.textContent = `🏆 Líneas: ${linesCompleted.map(l => l.nombre).join(', ')} (+${linesCompleted.reduce((sum, l) => sum + l.puntos, 0)} pts)`;
+        gridParent.appendChild(infoDiv);
     }
 }
 
 function calcularLineasCompletadas(completedIds) {
     const lines = [];
-    for (let f = 0; f < FILAS; f++) {
-        const ids = []; for (let c = 0; c < COLUMNAS; c++) { const i = f * COLUMNAS + c; if (i < allObjectives.length) ids.push(allObjectives[i].id); }
-        if (ids.length > 0 && ids.every(id => completedIds.includes(id))) lines.push({ tipo: 'horizontal', indice: f, nombre: `Fila ${f + 1}`, puntos: 100 });
+    for (let fila = 0; fila < FILAS; fila++) {
+        const objetosEnFila = [];
+        for (let col = 0; col < COLUMNAS; col++) {
+            const index = fila * COLUMNAS + col;
+            if (index < allObjectives.length) objetosEnFila.push(allObjectives[index].id);
+        }
+        if (objetosEnFila.length > 0 && objetosEnFila.every(id => completedIds.includes(id))) {
+            lines.push({ tipo: 'horizontal', indice: fila, nombre: `Fila ${fila + 1}`, puntos: 100 });
+        }
     }
-    for (let c = 0; c < COLUMNAS; c++) {
-        const ids = []; for (let f = 0; f < FILAS; f++) { const i = f * COLUMNAS + c; if (i < allObjectives.length) ids.push(allObjectives[i].id); }
-        if (ids.length > 0 && ids.every(id => completedIds.includes(id))) lines.push({ tipo: 'vertical', indice: c, nombre: `Columna ${c + 1}`, puntos: 150 });
+    for (let col = 0; col < COLUMNAS; col++) {
+        const objetosEnCol = [];
+        for (let fila = 0; fila < FILAS; fila++) {
+            const index = fila * COLUMNAS + col;
+            if (index < allObjectives.length) objetosEnCol.push(allObjectives[index].id);
+        }
+        if (objetosEnCol.length > 0 && objetosEnCol.every(id => completedIds.includes(id))) {
+            lines.push({ tipo: 'vertical', indice: col, nombre: `Columna ${col + 1}`, puntos: 150 });
+        }
     }
-    if (allObjectives.length >= 12 && [0, 2, 15, 17].every(idx => completedIds.includes(allObjectives[idx]?.id))) lines.push({ tipo: 'esquinas', indice: 0, nombre: '4 Esquinas', puntos: 100 });
-    if (allObjectives.length > 0 && allObjectives.every(obj => completedIds.includes(obj.id))) lines.push({ tipo: 'llena', indice: 0, nombre: '¡BINGO TOTAL!', puntos: 300 });
+    if (allObjectives.length >= 12) {
+        const esquinas = [0, 2, 15, 17];
+        if (esquinas.every(idx => completedIds.includes(allObjectives[idx]?.id))) {
+            lines.push({ tipo: 'esquinas', indice: 0, nombre: '4 Esquinas', puntos: 100 });
+        }
+    }
+    if (allObjectives.length > 0 && allObjectives.every(obj => completedIds.includes(obj.id))) {
+        lines.push({ tipo: 'llena', indice: 0, nombre: '¡BINGO TOTAL!', puntos: 300 });
+    }
     return lines;
 }
 
-function verificarObjetoEnLinea(fila, columna, lines) {
-    return lines.some(l => (l.tipo === 'horizontal' && l.indice === fila) || (l.tipo === 'vertical' && l.indice === columna) || (l.tipo === 'esquinas' && ((fila === 0 || fila === 5) && (columna === 0 || columna === 2))) || l.tipo === 'llena');
+function verificarObjetoEnLinea(fila, columna, linesCompleted) {
+    return linesCompleted.some(line => {
+        if (line.tipo === 'horizontal' && line.indice === fila) return true;
+        if (line.tipo === 'vertical' && line.indice === columna) return true;
+        if (line.tipo === 'esquinas' && ((fila === 0 || fila === 5) && (columna === 0 || columna === 2))) return true;
+        if (line.tipo === 'llena') return true;
+        return false;
+    });
 }
 
 function checkForCompletion() {
@@ -226,20 +274,27 @@ function checkForCompletion() {
     if (!teamData) return;
     const completedIds = teamData.objetivos_completados || [];
     const currentBingos = calcularLineasCompletadas(completedIds);
-    const newBingos = currentBingos.filter(c => !(lastBingos[currentTeam] || []).some(p => p.tipo === c.tipo && p.indice === c.indice));
-    newBingos.forEach(b => showToast(`🎯 ¡${b.nombre}! +${b.puntos} pts`));
-    const total = completedIds.filter(id => allObjectives.some(o => o.id === id)).length;
-    if (allObjectives.length > 0 && total === allObjectives.length && (lastCompletedCount[currentTeam] || 0) < allObjectives.length) { triggerConfetti(); showToast('🎉 ¡BINGO TOTAL!'); }
-    lastBingos[currentTeam] = currentBingos; lastCompletedCount[currentTeam] = total;
+    const previousBingos = lastBingos[currentTeam] || [];
+    const newBingos = currentBingos.filter(current => !previousBingos.some(prev => prev.tipo === current.tipo && prev.indice === current.indice));
+    newBingos.forEach(bingo => showToast(`🎯 ¡${bingo.nombre} completada! +${bingo.puntos} pts`));
+    
+    const totalCompletados = completedIds.filter(id => allObjectives.some(obj => obj.id === id)).length;
+    if (allObjectives.length > 0 && totalCompletados === allObjectives.length && (lastCompletedCount[currentTeam] || 0) < allObjectives.length) {
+        triggerConfetti();
+        showToast('🎉 ¡BINGO TOTAL! ¡Todos los objetivos completados!');
+    }
+    lastBingos[currentTeam] = currentBingos;
+    lastCompletedCount[currentTeam] = totalCompletados;
 }
 
 function updateTeamInfo() {
-    const td = allTeams.find(t => t.id === currentTeam);
-    if (td) {
-        document.getElementById('teamPointsDisplay').textContent = td.puntos || 0;
+    const teamData = allTeams.find(t => t.id === currentTeam);
+    if (teamData) {
+        document.getElementById('teamPointsDisplay').textContent = teamData.puntos || 0;
         const sorted = [...allTeams].sort((a, b) => (b.puntos || 0) - (a.puntos || 0));
-        const pos = sorted.findIndex(t => t.id === currentTeam) + 1;
-        document.getElementById('teamRankDisplay').textContent = `Posición: ${{1:'🥇',2:'🥈',3:'🥉'}[pos] || '#'+pos} | ${(td.objetivos_completados||[]).length}/${allObjectives.length}`;
+        const position = sorted.findIndex(t => t.id === currentTeam) + 1;
+        const rankEmojis = { 1: '🥇', 2: '🥈', 3: '🥉' };
+        document.getElementById('teamRankDisplay').textContent = `Posición: ${rankEmojis[position] || '#' + position} | ${(teamData.objetivos_completados || []).length}/${allObjectives.length} objetos`;
     }
 }
 
@@ -247,56 +302,132 @@ function renderRanking() {
     const tbody = document.getElementById('rankingBody');
     if (!tbody) return;
     const sorted = [...allTeams].sort((a, b) => (b.puntos || 0) - (a.puntos || 0));
-    if (sorted.length > 0 && previousFirstPlace !== sorted[0].id) { triggerFirstPlaceAnimation(sorted[0]); previousFirstPlace = sorted[0].id; }
-    tbody.innerHTML = sorted.length === 0 ? '<tr><td colspan="3">No hay equipos</td></tr>' : sorted.map((t, i) => `<tr class="${{1:'position-1',2:'position-2',3:'position-3'}[i+1]||''}"><td><span class="rank-badge ${{1:'rank-1',2:'rank-2',3:'rank-3'}[i+1]||'rank-other'}">${i+1}</span></td><td><span class="team-dot" style="background:${t.color||'#888'};color:${t.color||'#888'};"></span>${t.nombre||t.id}</td><td><strong>${t.puntos||0}</strong> pts</td></tr>`).join('');
+    if (sorted.length > 0 && previousFirstPlace !== null && previousFirstPlace !== sorted[0].id) {
+        triggerFirstPlaceAnimation(sorted[0]);
+    }
+    if (sorted.length > 0) previousFirstPlace = sorted[0].id;
+    
+    const rankClasses = { 1: 'rank-1', 2: 'rank-2', 3: 'rank-3' };
+    const positionClasses = { 1: 'position-1', 2: 'position-2', 3: 'position-3' };
+    
+    tbody.innerHTML = sorted.length === 0 ? '<tr><td colspan="3" style="text-align:center;color:#a0a0b0;">No hay equipos aún</td></tr>' : sorted.map((team, index) => {
+        const pos = index + 1;
+        const completados = (team.objetivos_completados || []).length;
+        return `<tr class="${positionClasses[pos] || ''}">
+            <td><span class="rank-badge ${rankClasses[pos] || 'rank-other'}">${pos}</span></td>
+            <td><span class="team-dot" style="background:${team.color || '#888'};color:${team.color || '#888'};"></span>${team.nombre || team.id} <span style="font-size:0.7rem;color:#a0a0b0;">(${completados}/${allObjectives.length})</span></td>
+            <td><strong>${team.puntos || 0}</strong> pts</td>
+        </tr>`;
+    }).join('');
 }
 
-function triggerFirstPlaceAnimation(team) { showToast(`🏆 ¡${team.nombre || team.id} primer lugar!`); }
+function triggerFirstPlaceAnimation(team) { showToast(`🏆 ¡${team.nombre || team.id} tomó el primer lugar!`); }
 
 function triggerConfetti() {
     const container = document.getElementById('confettiContainer');
     if (!container) return;
-    const colors = ['#ff4444','#4488ff','#44ff44','#ffd700','#ff6b35','#ff00ff','#00ffff','#ffffff'];
+    const colors = ['#ff4444', '#4488ff', '#44ff44', '#ffd700', '#ff6b35', '#ff00ff', '#00ffff', '#ffffff'];
     for (let i = 0; i < 80; i++) {
-        const piece = document.createElement('div'); piece.className = 'confetti-piece';
-        piece.style.cssText = `left:${Math.random()*100}%;background:${colors[Math.floor(Math.random()*colors.length)]};animation-delay:${Math.random()*1.5}s;animation-duration:${2+Math.random()*3}s;`;
-        container.appendChild(piece); setTimeout(() => piece.remove(), 4000);
+        const piece = document.createElement('div');
+        piece.className = 'confetti-piece';
+        piece.style.cssText = `left:${Math.random() * 100}%;background:${colors[Math.floor(Math.random() * colors.length)]};animation-delay:${Math.random() * 1.5}s;animation-duration:${2 + Math.random() * 3}s;`;
+        container.appendChild(piece);
+        setTimeout(() => piece.remove(), 4000);
     }
 }
 
-function updateTimer(data) {
-    const el = document.getElementById('timerValue');
-    if (!el) return;
-    if (!data || data.estado === 'esperando') { el.textContent = '--:--'; return; }
-    if (data.estado === 'finalizada') { el.textContent = 'FINALIZADO'; return; }
-    if (data.pausado) { el.textContent = formatTime(data.tiempo_restante || 0) + ' ⏸'; return; }
-    if (window.timerInterval) clearInterval(window.timerInterval);
-    const update = () => {
-        const restante = Math.max(0, (data.tiempo_total || 0) - Math.floor((Date.now() - (data.tiempo_inicio?.toMillis() || Date.now())) / 1000));
-        el.textContent = formatTime(restante);
-        el.className = 'timer-value' + (restante <= 60 ? ' urgent' : restante <= 300 ? ' warning' : '');
+function updateTimer(partidaData) {
+    const timerEl = document.getElementById('timerValue');
+    if (!timerEl) return;
+    
+    if (window.timerInterval) { clearInterval(window.timerInterval); window.timerInterval = null; }
+    
+    if (!partidaData || partidaData.estado === 'esperando') {
+        timerEl.textContent = '--:--';
+        timerEl.className = 'timer-value';
+        return;
+    }
+    
+    if (partidaData.estado === 'finalizada') {
+        timerEl.textContent = 'FINALIZADO';
+        timerEl.className = 'timer-value';
+        return;
+    }
+    
+    if (partidaData.pausado) {
+        const restante = partidaData.tiempo_restante || partidaData.tiempo_total || 0;
+        timerEl.textContent = formatTime(restante) + ' ⏸';
+        timerEl.className = 'timer-value warning';
+        return;
+    }
+    
+    const updateDisplay = () => {
+        const ahora = Date.now();
+        const tiempoInicio = partidaData.tiempo_inicio?.toMillis() || ahora;
+        const tiempoTotal = partidaData.tiempo_total || 0;
+        const transcurrido = Math.floor((ahora - tiempoInicio) / 1000);
+        const restante = Math.max(0, tiempoTotal - transcurrido);
+        
+        timerEl.textContent = formatTime(restante);
+        
+        if (restante <= 0) {
+            timerEl.className = 'timer-value urgent';
+            clearInterval(window.timerInterval);
+            window.timerInterval = null;
+        } else if (restante <= 60) {
+            timerEl.className = 'timer-value urgent';
+        } else if (restante <= 300) {
+            timerEl.className = 'timer-value warning';
+        } else {
+            timerEl.className = 'timer-value';
+        }
     };
-    update(); window.timerInterval = setInterval(update, 1000);
+    
+    updateDisplay();
+    window.timerInterval = setInterval(updateDisplay, 1000);
 }
 
-function formatTime(s) { const m = Math.floor(s / 60); return `${String(m).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`; }
+function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
 
-function showToast(msg) {
+function showToast(message) {
     const container = document.getElementById('toastContainer');
     if (!container) return;
-    if (container.querySelectorAll('.toast-msg').length >= 3) container.querySelector('.toast-msg').remove();
-    const toast = document.createElement('div'); toast.className = 'toast-msg';
-    toast.innerHTML = `<span>📢</span> ${msg} <button class="toast-close" onclick="this.parentElement.remove()">✕</button>`;
+    const existingToasts = container.querySelectorAll('.toast-msg');
+    if (existingToasts.length >= 3) existingToasts[0].remove();
+    
+    const toast = document.createElement('div');
+    toast.className = 'toast-msg';
+    toast.innerHTML = `<span class="toast-icon">📢</span> ${message} <button class="toast-close" onclick="this.parentElement.remove()">✕</button>`;
     container.appendChild(toast);
-    setTimeout(() => { if (toast.parentNode) { toast.style.animation = 'toastOut 0.4s ease forwards'; setTimeout(() => toast.remove(), 400); } }, 3000);
+    
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.style.animation = 'toastOut 0.4s ease forwards';
+            setTimeout(() => toast.remove(), 400);
+        }
+    }, 3000);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('🎯 Bingo FF Live - Inicializando...');
     cargarEquiposInicio();
-    const saved = localStorage.getItem('bingo_currentTeam');
-    if (saved) { currentTeam = saved; currentTeamColor = localStorage.getItem('bingo_currentTeamColor') || '#ff4444'; currentTeamEmoji = localStorage.getItem('bingo_currentTeamEmoji') || '🔴'; showTeamView(); }
+    const savedTeam = localStorage.getItem('bingo_currentTeam');
+    if (savedTeam) {
+        currentTeam = savedTeam;
+        currentTeamColor = localStorage.getItem('bingo_currentTeamColor') || '#ff4444';
+        currentTeamEmoji = localStorage.getItem('bingo_currentTeamEmoji') || '🔴';
+        showTeamView();
+    }
 });
 
 window.addEventListener('beforeunload', () => {
-    if (currentTeam) { localStorage.setItem('bingo_currentTeam', currentTeam); localStorage.setItem('bingo_currentTeamColor', currentTeamColor); localStorage.setItem('bingo_currentTeamEmoji', currentTeamEmoji); }
+    if (currentTeam) {
+        localStorage.setItem('bingo_currentTeam', currentTeam);
+        localStorage.setItem('bingo_currentTeamColor', currentTeamColor);
+        localStorage.setItem('bingo_currentTeamEmoji', currentTeamEmoji);
+    }
 });
