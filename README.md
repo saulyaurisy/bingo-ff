@@ -248,8 +248,8 @@ Este proyecto está bajo la Licencia MIT.
 
 ## 📧 Contacto
 
-- GitHub: @tu-usuario
-- Email: tu-email@ejemplo.com
+- IG: syxnb.10
+- Email: saulcuenta09@gmail.com
 
 ---
 
