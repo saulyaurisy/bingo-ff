@@ -16,14 +16,18 @@ let equiposInicioUnsub = null;
 const FILAS = 6;
 const COLUMNAS = 3;
 
+console.log('🎯 Bingo FF Live - app.js cargado');
+
 function cargarEquiposInicio() {
+    console.log('📋 Cargando equipos en pantalla principal...');
     const grid = document.getElementById('teamsGrid');
-    if (!grid) return;
+    if (!grid) { console.error('❌ No se encontró teamsGrid'); return; }
     if (equiposInicioUnsub) equiposInicioUnsub();
     
     equiposInicioUnsub = db.collection('equipos').onSnapshot(snapshot => {
         const teams = [];
         snapshot.forEach(doc => teams.push({ id: doc.id, ...doc.data() }));
+        console.log(`👥 ${teams.length} equipos encontrados`);
         
         if (teams.length === 0) {
             grid.innerHTML = `<p style="color:#a0a0b0;text-align:center;grid-column:1/-1;padding:20px;">No hay equipos aún.<br>El administrador debe crearlos.</p>
@@ -61,10 +65,14 @@ function cargarEquiposInicio() {
         }).join('');
         
         grid.innerHTML += `<a href="admin.html" class="team-btn admin-btn"><span class="team-icon">🔐</span>Administrador</a>`;
+        console.log('✅ Equipos renderizados');
+    }, error => {
+        console.error('❌ Error al cargar equipos:', error);
     });
 }
 
 function selectTeam(teamId, emoji, color) {
+    console.log(`🖱️ Seleccionando equipo: ${teamId}`);
     currentTeam = teamId; currentTeamColor = color; currentTeamEmoji = emoji;
     document.getElementById('modalTeamTitle').textContent = `${emoji} Unirse a ${teamId.charAt(0).toUpperCase() + teamId.slice(1)}`;
     document.getElementById('playerName').value = localStorage.getItem(`bingo_playerName_${teamId}`) || '';
@@ -73,27 +81,46 @@ function selectTeam(teamId, emoji, color) {
     setTimeout(() => document.getElementById('playerName').focus(), 100);
 }
 
-function closeModal() { document.getElementById('nameModal').classList.remove('show'); }
+function closeModal() { 
+    console.log('❌ Modal cerrado');
+    document.getElementById('nameModal').classList.remove('show'); 
+}
 
 function joinTeam() {
     const name = document.getElementById('playerName').value.trim();
     const uid = document.getElementById('playerUID').value.trim();
     if (!name) { alert('Por favor ingresa tu nombre'); document.getElementById('playerName').focus(); return; }
     
+    console.log(`👤 Unirse a ${currentTeam}: ${name}`);
     localStorage.setItem(`bingo_playerName_${currentTeam}`, name);
     localStorage.setItem(`bingo_playerUID_${currentTeam}`, uid);
     
     const teamRef = db.collection('equipos').doc(currentTeam);
     teamRef.get().then(doc => {
-        if (doc.exists) return teamRef.update({ jugador_nombre: name, jugador_uid: uid });
-        else return teamRef.set({ nombre: currentTeam.charAt(0).toUpperCase() + currentTeam.slice(1), color: currentTeamColor, puntos: 0, objetivos_completados: [], bingos_ganados: [], jugador_nombre: name, jugador_uid: uid });
-    }).catch(err => console.error('Error:', err));
+        if (doc.exists) {
+            console.log('📝 Actualizando equipo existente');
+            return teamRef.update({ jugador_nombre: name, jugador_uid: uid });
+        } else {
+            console.log('🆕 Creando nuevo equipo');
+            return teamRef.set({ 
+                nombre: currentTeam.charAt(0).toUpperCase() + currentTeam.slice(1), 
+                color: currentTeamColor, puntos: 0, 
+                objetivos_completados: [], bingos_ganados: [], 
+                jugador_nombre: name, jugador_uid: uid 
+            });
+        }
+    }).then(() => {
+        console.log('✅ Equipo guardado en Firestore');
+    }).catch(err => {
+        console.error('❌ Error al guardar equipo:', err);
+    });
     
     document.getElementById('nameModal').classList.remove('show');
     showTeamView();
 }
 
 function showTeamView() {
+    console.log('🎮 Mostrando vista de equipo');
     document.getElementById('homeScreen').style.display = 'none';
     document.getElementById('teamView').style.display = 'block';
     document.getElementById('teamView').classList.add('active');
@@ -104,6 +131,7 @@ function showTeamView() {
 }
 
 function goHome() {
+    console.log('🏠 Volviendo al inicio');
     unsubscribes.forEach(unsub => unsub());
     unsubscribes = [];
     if (window.timerInterval) { clearInterval(window.timerInterval); window.timerInterval = null; }
@@ -115,21 +143,29 @@ function goHome() {
 }
 
 function setupTeamListeners() {
+    console.log('👂 Configurando listeners en tiempo real');
     unsubscribes.forEach(unsub => unsub());
     unsubscribes = [];
     const tiempoEntrada = Date.now();
     
     unsubscribes.push(db.collection('objetivos').orderBy('orden', 'asc').onSnapshot(snapshot => {
-        allObjectives = []; snapshot.forEach(doc => allObjectives.push({ id: doc.id, ...doc.data() }));
+        allObjectives = []; 
+        snapshot.forEach(doc => allObjectives.push({ id: doc.id, ...doc.data() }));
+        console.log(`📦 ${allObjectives.length} objetivos cargados`);
         renderBingoGrid();
-    }));
+    }, error => console.error('❌ Error objetivos:', error)));
+    
     unsubscribes.push(db.collection('equipos').onSnapshot(snapshot => {
-        allTeams = []; snapshot.forEach(doc => allTeams.push({ id: doc.id, ...doc.data() }));
+        allTeams = []; 
+        snapshot.forEach(doc => allTeams.push({ id: doc.id, ...doc.data() }));
+        console.log(`👥 ${allTeams.length} equipos actualizados`);
         updateTeamInfo(); renderRanking(); checkForCompletion(); renderBingoGrid();
-    }));
+    }, error => console.error('❌ Error equipos:', error)));
+    
     unsubscribes.push(db.collection('partida').doc('actual').onSnapshot(doc => {
         if (doc.exists) updateTimer(doc.data());
     }));
+    
     unsubscribes.push(db.collection('notificaciones').orderBy('timestamp', 'desc').limit(5).onSnapshot(snapshot => {
         snapshot.docChanges().forEach(change => {
             if (change.type === 'added') {
@@ -140,58 +176,124 @@ function setupTeamListeners() {
     }));
 }
 
+// ===== JUGADOR MARCA/DESMARCA OBJETO =====
 async function playerToggleObjective(objectiveId) {
-    if (!currentTeam) return;
+    console.log('🖱️ Click en objeto:', objectiveId);
+    console.log('👤 Equipo actual:', currentTeam);
+    
+    if (!currentTeam) {
+        console.error('❌ No hay equipo seleccionado');
+        showToast('❌ Error: No hay equipo seleccionado');
+        return;
+    }
+    
     const teamData = allTeams.find(t => t.id === currentTeam);
-    if (!teamData) return;
+    if (!teamData) {
+        console.error('❌ No se encontró el equipo:', currentTeam);
+        showToast('❌ Error: Equipo no encontrado');
+        return;
+    }
+    
     const objective = allObjectives.find(o => o.id === objectiveId);
-    if (!objective) return;
+    if (!objective) {
+        console.error('❌ No se encontró el objeto:', objectiveId);
+        showToast('❌ Error: Objeto no encontrado');
+        return;
+    }
+    
+    console.log('📦 Equipo:', teamData.nombre, '| Puntos:', teamData.puntos);
+    console.log('🎯 Objeto:', objective.nombre, '| Puntos:', objective.puntos);
     
     let completedIds = [...(teamData.objetivos_completados || [])];
     let puntos = teamData.puntos || 0;
     let bingosGanados = [...(teamData.bingos_ganados || [])];
     
+    // Si ya está completado, DESMARCAR
     if (completedIds.includes(objectiveId)) {
-        if (!confirm(`¿Quieres DESMARCAR "${objective.nombre}"?\n\nSe restarán ${objective.puntos} puntos.`)) return;
+        const confirmar = confirm(`¿Quieres DESMARCAR "${objective.nombre}"?\n\nSe restarán ${objective.puntos} puntos.`);
+        if (!confirmar) return;
+        
         completedIds = completedIds.filter(id => id !== objectiveId);
-        const basePoints = completedIds.reduce((sum, id) => sum + (allObjectives.find(o => o.id === id)?.puntos || 0), 0);
+        
+        const basePoints = completedIds.reduce((sum, id) => {
+            const obj = allObjectives.find(o => o.id === id);
+            return sum + (obj?.puntos || 0);
+        }, 0);
+        
         const remainingLines = calcularLineasCompletadas(completedIds);
-        puntos = basePoints + remainingLines.reduce((sum, l) => sum + l.puntos, 0);
+        const bingoPoints = remainingLines.reduce((sum, l) => sum + l.puntos, 0);
+        puntos = basePoints + bingoPoints;
         bingosGanados = [];
         
+        console.log('🔄 Desmarcando... Nuevos puntos:', puntos);
+        
         try {
-            await db.collection('equipos').doc(currentTeam).update({ objetivos_completados: completedIds, puntos, bingos_ganados: bingosGanados });
-            await db.collection('notificaciones').add({ mensaje: `❌ ${teamData.nombre || currentTeam} DESMARCÓ: ${objective.nombre}`, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
+            await db.collection('equipos').doc(currentTeam).update({
+                objetivos_completados: completedIds,
+                puntos: puntos,
+                bingos_ganados: bingosGanados
+            });
+            console.log('✅ Desmarcado en Firestore');
             showToast(`❌ "${objective.nombre}" desmarcado`);
-        } catch (error) { console.error('Error:', error); showToast('❌ Error al desmarcar'); }
+        } catch (error) {
+            console.error('❌ Error Firestore:', error);
+            showToast('❌ Error: ' + error.message);
+        }
         return;
     }
     
-    if (!confirm(`¿Confirmas que encontraste "${objective.nombre}"?\n\n+${objective.puntos} pts`)) return;
+    // MARCAR COMO COMPLETADO
+    const confirmar = confirm(`¿Confirmas que encontraste "${objective.nombre}"?\n\n+${objective.puntos} pts`);
+    if (!confirmar) return;
     
     completedIds.push(objectiveId);
     puntos += (objective.puntos || 0);
     
     const previousLines = calcularLineasCompletadas(teamData.objetivos_completados || []);
     const newLines = calcularLineasCompletadas(completedIds);
-    const newBingos = newLines.filter(nl => !previousLines.some(pl => pl.tipo === nl.tipo && pl.indice === nl.indice));
-    newBingos.forEach(b => { puntos += b.puntos; bingosGanados.push(`${b.tipo}_${b.indice}_${Date.now()}`); });
+    const newBingos = newLines.filter(nl => 
+        !previousLines.some(pl => pl.tipo === nl.tipo && pl.indice === nl.indice)
+    );
+    
+    newBingos.forEach(b => {
+        puntos += b.puntos;
+        bingosGanados.push(`${b.tipo}_${b.indice}_${Date.now()}`);
+    });
+    
+    console.log('✅ Marcando... Nuevos puntos:', puntos);
+    if (newBingos.length > 0) console.log('🏆 Bingos:', newBingos.map(b => b.nombre));
     
     try {
-        await db.collection('equipos').doc(currentTeam).update({ objetivos_completados: completedIds, puntos, bingos_ganados: bingosGanados });
-        await db.collection('notificaciones').add({ mensaje: `✅ ${teamData.nombre || currentTeam} completó: ${objective.nombre} (+${objective.puntos} pts)`, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
-        newBingos.forEach(bingo => {
-            db.collection('notificaciones').add({ mensaje: `🎯 ¡${teamData.nombre || currentTeam} completó ${bingo.nombre}! (+${bingo.puntos} pts)`, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
+        await db.collection('equipos').doc(currentTeam).update({
+            objetivos_completados: completedIds,
+            puntos: puntos,
+            bingos_ganados: bingosGanados
         });
+        console.log('✅ Guardado en Firestore');
         showToast(`✅ "${objective.nombre}" +${objective.puntos} pts`);
-    } catch (error) { console.error('Error:', error); showToast('❌ Error al marcar objeto'); }
+        
+        if (newBingos.length > 0) {
+            newBingos.forEach(bingo => {
+                showToast(`🎯 ¡${bingo.nombre}! +${bingo.puntos} pts`);
+            });
+        }
+    } catch (error) {
+        console.error('❌ Error Firestore:', error);
+        console.error('Código:', error.code);
+        console.error('Mensaje:', error.message);
+        showToast('❌ Error: ' + error.message);
+    }
 }
 
 function renderBingoGrid() {
     const grid = document.getElementById('bingoGrid');
     if (!grid) return;
     grid.className = 'bingo-grid-3x6';
-    if (allObjectives.length === 0) { grid.innerHTML = '<p style="color:#a0a0b0;text-align:center;grid-column:1/-1;padding:20px;">Cargando objetivos...</p>'; return; }
+    
+    if (allObjectives.length === 0) {
+        grid.innerHTML = '<p style="color:#a0a0b0;text-align:center;grid-column:1/-1;padding:20px;">Cargando objetivos...</p>';
+        return;
+    }
     
     const currentTeamData = allTeams.find(t => t.id === currentTeam);
     const completedIds = currentTeamData?.objetivos_completados || [];
@@ -339,27 +441,11 @@ function triggerConfetti() {
 function updateTimer(partidaData) {
     const timerEl = document.getElementById('timerValue');
     if (!timerEl) return;
-    
     if (window.timerInterval) { clearInterval(window.timerInterval); window.timerInterval = null; }
     
-    if (!partidaData || partidaData.estado === 'esperando') {
-        timerEl.textContent = '--:--';
-        timerEl.className = 'timer-value';
-        return;
-    }
-    
-    if (partidaData.estado === 'finalizada') {
-        timerEl.textContent = 'FINALIZADO';
-        timerEl.className = 'timer-value';
-        return;
-    }
-    
-    if (partidaData.pausado) {
-        const restante = partidaData.tiempo_restante || partidaData.tiempo_total || 0;
-        timerEl.textContent = formatTime(restante) + ' ⏸';
-        timerEl.className = 'timer-value warning';
-        return;
-    }
+    if (!partidaData || partidaData.estado === 'esperando') { timerEl.textContent = '--:--'; timerEl.className = 'timer-value'; return; }
+    if (partidaData.estado === 'finalizada') { timerEl.textContent = 'FINALIZADO'; timerEl.className = 'timer-value'; return; }
+    if (partidaData.pausado) { timerEl.textContent = formatTime(partidaData.tiempo_restante || partidaData.tiempo_total || 0) + ' ⏸'; timerEl.className = 'timer-value warning'; return; }
     
     const updateDisplay = () => {
         const ahora = Date.now();
@@ -367,22 +453,12 @@ function updateTimer(partidaData) {
         const tiempoTotal = partidaData.tiempo_total || 0;
         const transcurrido = Math.floor((ahora - tiempoInicio) / 1000);
         const restante = Math.max(0, tiempoTotal - transcurrido);
-        
         timerEl.textContent = formatTime(restante);
-        
-        if (restante <= 0) {
-            timerEl.className = 'timer-value urgent';
-            clearInterval(window.timerInterval);
-            window.timerInterval = null;
-        } else if (restante <= 60) {
-            timerEl.className = 'timer-value urgent';
-        } else if (restante <= 300) {
-            timerEl.className = 'timer-value warning';
-        } else {
-            timerEl.className = 'timer-value';
-        }
+        if (restante <= 0) { timerEl.className = 'timer-value urgent'; clearInterval(window.timerInterval); window.timerInterval = null; }
+        else if (restante <= 60) timerEl.className = 'timer-value urgent';
+        else if (restante <= 300) timerEl.className = 'timer-value warning';
+        else timerEl.className = 'timer-value';
     };
-    
     updateDisplay();
     window.timerInterval = setInterval(updateDisplay, 1000);
 }
@@ -398,18 +474,11 @@ function showToast(message) {
     if (!container) return;
     const existingToasts = container.querySelectorAll('.toast-msg');
     if (existingToasts.length >= 3) existingToasts[0].remove();
-    
     const toast = document.createElement('div');
     toast.className = 'toast-msg';
     toast.innerHTML = `<span class="toast-icon">📢</span> ${message} <button class="toast-close" onclick="this.parentElement.remove()">✕</button>`;
     container.appendChild(toast);
-    
-    setTimeout(() => {
-        if (toast.parentNode) {
-            toast.style.animation = 'toastOut 0.4s ease forwards';
-            setTimeout(() => toast.remove(), 400);
-        }
-    }, 3000);
+    setTimeout(() => { if (toast.parentNode) { toast.style.animation = 'toastOut 0.4s ease forwards'; setTimeout(() => toast.remove(), 400); } }, 3000);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -417,6 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
     cargarEquiposInicio();
     const savedTeam = localStorage.getItem('bingo_currentTeam');
     if (savedTeam) {
+        console.log('💾 Sesión guardada encontrada:', savedTeam);
         currentTeam = savedTeam;
         currentTeamColor = localStorage.getItem('bingo_currentTeamColor') || '#ff4444';
         currentTeamEmoji = localStorage.getItem('bingo_currentTeamEmoji') || '🔴';
