@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bingo FF Live</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0a0a0f; color: #e0e0e0; min-height: 100vh; }
+        #nameModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); z-index: 9999; align-items: center; justify-content: center; }
+        #nameModal.show { display: flex !important; }
+        #nameModal .modal-box { background: #1a1a2e; border-radius: 16px; padding: 30px; width: 90%; max-width: 420px; border: 1px solid rgba(255, 255, 255, 0.15); }
+        #nameModal h3 { text-align: center; font-size: 1.4rem; margin-bottom: 20px; font-weight: 700; }
+        #nameModal label { display: block; color: #a0a0b0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; font-weight: 600; }
+        #nameModal input { width: 100%; padding: 12px 15px; background: #12121a; border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; border-radius: 8px; font-size: 1rem; margin-bottom: 15px; outline: none; }
+        #nameModal input:focus { border-color: #00ff88; box-shadow: 0 0 0 3px rgba(0, 255, 136, 0.1); }
+        #nameModal .btn { width: 100%; padding: 12px; border-radius: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; border: none; font-size: 1rem; margin-top: 5px; }
+        #nameModal .btn-join { background: linear-gradient(135deg, #ff6b35, #ff4444); color: #fff; }
+        #nameModal .btn-cancel { background: transparent; border: 1px solid rgba(255, 255, 255, 0.3); color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="main-container" id="mainContainer">
+        <div id="homeScreen">
+            <div class="main-title">
+                <h1>BINGO FF LIVE</h1>
+                <p class="subtitle">Free Fire Bingo Challenge</p>
+            </div>
+            <div class="teams-grid" id="teamsGrid">
+                <p style="color:#a0a0b0;text-align:center;grid-column:1/-1;padding:20px;">Cargando equipos...</p>
+            </div>
+        </div>
+        <div class="team-view" id="teamView" style="display:none;">
+            <button class="btn-gamer mb-3" onclick="goHome()" style="font-size:0.9rem;cursor:pointer;">← Volver al inicio</button>
+            <div class="team-header" id="teamHeader">
+                <div class="team-color-dot" id="teamColorDot" style="background: #ff4444; color: #ff4444;"></div>
+                <div class="team-info">
+                    <div class="team-name-display" id="teamNameDisplay">Equipo</div>
+                    <div class="team-rank" id="teamRankDisplay">Cargando ranking...</div>
+                </div>
+                <div class="text-end">
+                    <div style="font-size:0.8rem;color:var(--text-secondary);">PUNTUACIÓN</div>
+                    <div class="team-points" id="teamPointsDisplay">0</div>
+                </div>
+            </div>
+            <div class="timer-display">
+                <div class="timer-label">⏱ Tiempo Restante</div>
+                <div class="timer-value" id="timerValue">--:--</div>
+            </div>
+            <div class="admin-card">
+                <h5>🎯 Cartilla Bingo</h5>
+                <div class="bingo-grid-3x6" id="bingoGrid">
+                    <p style="color:#a0a0b0;text-align:center;grid-column:1/-1;padding:20px;">Cargando objetivos...</p>
+                </div>
+                <div id="bingoLinesInfo"></div>
+            </div>
+            <div class="ranking-section">
+                <h4>🏆 Ranking en Vivo</h4>
+                <div class="table-responsive">
+                    <table class="ranking-table" id="rankingTable">
+                        <thead><tr><th>#</th><th>Equipo</th><th>Puntos</th></tr></thead>
+                        <tbody id="rankingBody"><tr><td colspan="3" style="text-align:center;color:#a0a0b0;">Cargando...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="nameModal">
+        <div class="modal-box">
+            <h3 id="modalTeamTitle">Unirse a Equipo</h3>
+            <label>Tu Nombre *</label>
+            <input type="text" id="playerName" placeholder="Ingresa tu nombre de jugador" autocomplete="off">
+            <label>UID de Free Fire (opcional)</label>
+            <input type="text" id="playerUID" placeholder="Ej: 123456789" autocomplete="off">
+            <button class="btn btn-join" onclick="joinTeam()">Unirse 🔥</button>
+            <button class="btn btn-cancel" onclick="closeModal()">Cancelar</button>
+        </div>
+    </div>
+    <div class="toast-container" id="toastContainer"></div>
+    <div class="confetti-container" id="confettiContainer"></div>
+    <script src="firebase.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
